@@ -58,7 +58,7 @@ if __name__ == '__main__':
     sync_browser = create_sync_playwright_browser()
     toolkit = RetrievalPlayWrightBrowserToolkit.from_browser(sync_browser=sync_browser)
     tools = toolkit.get_tools()
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    llm = ChatOpenAI(model="gpt-4", temperature=0)
 
     agent = create_openai_retrieval_tools_agent(llm, tools, prompt)
     agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
