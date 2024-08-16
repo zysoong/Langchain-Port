@@ -1,7 +1,6 @@
 from typing import Sequence
 
 from langchain.agents.output_parsers.openai_tools import OpenAIToolsAgentOutputParser
-from langchain_community.agent_toolkits import PlayWrightBrowserToolkit
 from langchain_community.tools.playwright.utils import (
     create_sync_playwright_browser,
 )
@@ -16,8 +15,10 @@ from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_openai import ChatOpenAI
 
+from tool.toolkit import RetrievalPlayWrightBrowserToolkit
 
-def create_openai_rag_tools_agent(llm: BaseLanguageModel, tools: Sequence[BaseTool], prompt: ChatPromptTemplate) \
+
+def create_openai_retrieval_tools_agent(llm: BaseLanguageModel, tools: Sequence[BaseTool], prompt: ChatPromptTemplate) \
         -> Runnable:
     missing_vars = {"agent_scratchpad"}.difference(
         prompt.input_variables + list(prompt.partial_variables)
@@ -55,11 +56,11 @@ if __name__ == '__main__':
     ])
 
     sync_browser = create_sync_playwright_browser()
-    toolkit = PlayWrightBrowserToolkit.from_browser(sync_browser=sync_browser)
+    toolkit = RetrievalPlayWrightBrowserToolkit.from_browser(sync_browser=sync_browser)
     tools = toolkit.get_tools()
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
-    agent = create_openai_rag_tools_agent(llm, tools, prompt)
+    agent = create_openai_retrieval_tools_agent(llm, tools, prompt)
     agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
     command = {
         "quest": "On_Rough_Seas"
