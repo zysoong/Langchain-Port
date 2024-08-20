@@ -15,11 +15,26 @@ from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_openai import ChatOpenAI
 
+from tool.injector import PromptInjector
 from tool.toolkit import RetrievalPlayWrightBrowserToolkit
 
 
-def create_openai_retrieval_tools_agent(llm: BaseLanguageModel, tools: Sequence[BaseTool], prompt: ChatPromptTemplate) \
-        -> Runnable:
+def create_openai_tools_agent_and_inject_prompts(
+        llm: BaseLanguageModel, tools: Sequence[BaseTool], prompt: ChatPromptTemplate
+) -> Runnable:
+    """Create an agent that uses OpenAI tools.
+    The prompts will be injected to the tools
+    automatically.
+    Check the documentation of 'create_openai_tools_agent'
+    for detailed instructions.
+
+    Args:
+        llm: LLM to use as the agent.
+        tools: Tools this agent has access to. Prompts will be injected as 'prompt'
+            attribute automatically.
+        prompt: The prompt to use. See Prompt section below for more on the expected
+            input variables.
+    """
     missing_vars = {"agent_scratchpad"}.difference(
         prompt.input_variables + list(prompt.partial_variables)
     )
@@ -28,14 +43,14 @@ def create_openai_retrieval_tools_agent(llm: BaseLanguageModel, tools: Sequence[
 
     llm_with_tools = llm.bind(tools=[convert_to_openai_tool(tool) for tool in tools])
 
-    def create_user_message_chain(x):
-        return format_to_openai_tool_messages(x["intermediate_steps"])
-
     agent = (
             RunnablePassthrough.assign(
-                agent_scratchpad=create_user_message_chain
+                agent_scratchpad=lambda x: format_to_openai_tool_messages(
+                    x["intermediate_steps"]
+                )
             )
             | prompt
+            | PromptInjector(inject_objects=tools, pass_on_injection_fail=True)
             | llm_with_tools
             | OpenAIToolsAgentOutputParser()
     )
@@ -60,7 +75,7 @@ if __name__ == '__main__':
     tools = toolkit.get_tools()
     llm = ChatOpenAI(model="gpt-4", temperature=0)
 
-    agent = create_openai_retrieval_tools_agent(llm, tools, prompt)
+    agent = create_openai_tools_agent_and_inject_prompts(llm, tools, prompt)
     agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
     command = {
         "quest": "On_Rough_Seas"

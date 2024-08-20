@@ -8,14 +8,15 @@ from langchain_core.callbacks import (
     AsyncCallbackManagerForToolRun,
     CallbackManagerForToolRun,
 )
-from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage
+from langchain_core.prompt_values import PromptValue
 from langchain_core.pydantic_v1 import BaseModel, root_validator
 
 from langchain_community.tools.playwright.utils import (
     aget_current_page, get_current_page,
 )
 from langchain_openai import OpenAIEmbeddings
-from langchain_text_splitters import CharacterTextSplitter, RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
 class RetrievalExtractTextTool(BaseBrowserTool):
@@ -24,6 +25,7 @@ class RetrievalExtractTextTool(BaseBrowserTool):
     name: str = "retrieval_extract_text"
     description: str = "Extract relevant text on the current webpage"
     args_schema: Type[BaseModel] = BaseModel
+    prompt: PromptValue = None
 
     @root_validator(pre=True)
     def check_acheck_bs_importrgs_for_ragextract(cls, values: dict) -> dict:
@@ -38,66 +40,64 @@ class RetrievalExtractTextTool(BaseBrowserTool):
         return values
 
     def _run(self, run_manager: Optional[CallbackManagerForToolRun] = None) -> str:
+        if hasattr(self, "prompt"):
+            retriever_query = next((msg for msg in self.prompt.messages if isinstance(msg, HumanMessage)), None).content
+            """Use the tool."""
+            # Use Beautiful Soup since it's faster than looping through the elements
+            from bs4 import BeautifulSoup
 
-        query = "Given is a quest name {quest}. "\
-              "Go to https://ffxiv.consolegameswiki.com/wiki/On_Rough_Seas and find the previous quests. "\
-              "Let's say the previous quest is 'some_quest'. Then, find the previous quest"\
-              "of 'some_quest', and continue this workflow, until 10 recursive previous quests are found (if "\
-              "exists)."\
-              "Give me all previous quests which is found."\
+            if self.sync_browser is None:
+                raise ValueError(f"Synchronous browser not provided to {self.name}")
 
-        """Use the tool."""
-        # Use Beautiful Soup since it's faster than looping through the elements
-        from bs4 import BeautifulSoup
+            page = get_current_page(self.sync_browser)
+            html_content = page.content()
 
-        if self.sync_browser is None:
-            raise ValueError(f"Synchronous browser not provided to {self.name}")
+            # Parse the HTML content with BeautifulSoup
+            soup = BeautifulSoup(html_content, "lxml")
 
-        page = get_current_page(self.sync_browser)
-        html_content = page.content()
-
-        # Parse the HTML content with BeautifulSoup
-        soup = BeautifulSoup(html_content, "lxml")
-
-        # Retrieve relevant text
-        full_text = "".join(text for text in soup.stripped_strings)
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=250, chunk_overlap=12)
-        chunk_list = text_splitter.create_documents(texts=[full_text])
-        embeddings = OpenAIEmbeddings()
-        db = FAISS.from_documents(chunk_list, embeddings)
-        retriever = db.as_retriever()
-        docs = retriever.invoke(query)
-        return " ".join(doc.page_content for doc in docs)
+            # Retrieve relevant text
+            full_text = "".join(text for text in soup.stripped_strings)
+            text_splitter = RecursiveCharacterTextSplitter(chunk_size=250, chunk_overlap=12)
+            chunk_list = text_splitter.create_documents(texts=[full_text])
+            embeddings = OpenAIEmbeddings()
+            db = FAISS.from_documents(chunk_list, embeddings)
+            retriever = db.as_retriever()
+            docs = retriever.invoke(retriever_query)
+            return " ".join(doc.page_content for doc in docs)
+        else:
+            raise ValueError(
+                "RetrievalExtractTextTool does not have attribute 'prompt'. Please use "
+                "the injector in 'langchain_core.prompts.injector' to inject prompt to the tool. "
+            )
 
     async def _arun(
             self, run_manager: Optional[AsyncCallbackManagerForToolRun] = None
     ) -> str:
         """Use the tool."""
+        if hasattr(self, "prompt"):
+            retriever_query = next((msg for msg in self.prompt.messages if isinstance(msg, HumanMessage)), None).content
+            if self.async_browser is None:
+                raise ValueError(f"Asynchronous browser not provided to {self.name}")
+            # Use Beautiful Soup since it's faster than looping through the elements
+            from bs4 import BeautifulSoup
 
-        query = "Given is a quest name {quest}. " \
-                "Go to https://ffxiv.consolegameswiki.com/wiki/On_Rough_Seas and find the previous quests. " \
-                "Let's say the previous quest is 'some_quest'. Then, find the previous quest" \
-                "of 'some_quest', and continue this workflow, until 10 recursive previous quests are found (if " \
-                "exists)." \
-                "Give me all previous quests which is found."
+            page = await aget_current_page(self.async_browser)
+            html_content = await page.content()
 
-        if self.async_browser is None:
-            raise ValueError(f"Asynchronous browser not provided to {self.name}")
-        # Use Beautiful Soup since it's faster than looping through the elements
-        from bs4 import BeautifulSoup
+            # Parse the HTML content with BeautifulSoup
+            soup = BeautifulSoup(html_content, "lxml")
 
-        page = await aget_current_page(self.async_browser)
-        html_content = await page.content()
-
-        # Parse the HTML content with BeautifulSoup
-        soup = BeautifulSoup(html_content, "lxml")
-
-        # Retrieve relevant text
-        full_text = "".join(text for text in soup.stripped_strings)
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=250, chunk_overlap=12)
-        chunk_list = text_splitter.create_documents(texts=[full_text])
-        embeddings = OpenAIEmbeddings()
-        db = FAISS.from_documents(chunk_list, embeddings)
-        retriever = db.as_retriever()
-        docs = retriever.invoke(query)
-        return " ".join(doc.page_content for doc in docs)
+            # Retrieve relevant text
+            full_text = "".join(text for text in soup.stripped_strings)
+            text_splitter = RecursiveCharacterTextSplitter(chunk_size=250, chunk_overlap=12)
+            chunk_list = text_splitter.create_documents(texts=[full_text])
+            embeddings = OpenAIEmbeddings()
+            db = FAISS.from_documents(chunk_list, embeddings)
+            retriever = db.as_retriever()
+            docs = retriever.invoke(retriever_query)
+            return " ".join(doc.page_content for doc in docs)
+        else:
+            raise ValueError(
+                "RetrievalExtractTextTool does not have attribute 'prompt'. Please use "
+                "the injector in 'langchain_core.prompts.injector' to inject prompt to the tool. "
+            )
